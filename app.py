@@ -2,163 +2,128 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# ================= 页面配置 =================
-st.set_page_config(page_title="双时点基金指挥官", layout="wide", page_icon="📈")
+# ================= 1. 系统配置与常量 =================
+st.set_page_config(page_title="双时点基金指挥官 v3.0", layout="wide", page_icon="⚔️")
 
-# ================= 初始化 Session State (数据持久化) =================
-# 如果是第一次打开，初始化一个默认的示例数据
+# 月度主题库 (根据你的需求文档)
+MONTHLY_THEMES = {
+    1: "年报预增 / 高股息 / 春节消费",
+    2: "春节错位 / 避险 / 两会前博弈",
+    3: "两会 (新质生产力/科技)",
+    4: "一季报业绩验证",
+    6: "半年报 / 电力夏峰 / 苹果链",
+    7: "中报行情 / 军工",
+    9: "金九银十 / 华为链",
+    12: "估值切换 / 机构排名战"
+}
+
+# ================= 2. 数据初始化 (Session State) =================
 if 'portfolio' not in st.session_state:
+    # 默认示例数据
     default_data = {
-        "基金名称": ["华夏电网设备", "国泰油气ETF", "华夏A500", "永赢半导体", "华安黄金联接"],
-        "代码": ["012345", "513350", "019000", "005678", "000216"],
-        "类型": ["场外", "场内", "场外", "场外", "场外"],
-        "持有天数": [15, 2, 3, 45, 5],
-        "持仓成本": [1.1500, 1.4300, 1.2450, 1.3500, 3.8500],
-        "昨日净值": [1.2189, 1.4026, 1.2414, 1.6878, 3.6984],
-        "对应指数": ["特高压", "油气", "沪深300", "半导体", "黄金"]
+        "基金名称": ["华夏电网设备", "国泰油气ETF", "华夏A500", "永赢半导体", "华安黄金联接", "华夏科创50"],
+        "代码": ["012345", "513350", "019000", "005678", "000216", "588000"],
+        "类型": ["场外", "场内", "场外", "场外", "场外", "场外"],
+        "持有天数": [15, 2, 3, 45, 5, 2],
+        "持仓成本": [1.1500, 1.4300, 1.2450, 1.3500, 3.8500, 1.000],
+        "昨日净值": [1.2189, 1.4026, 1.2414, 1.6878, 3.6984, 0.980],
+        "持有份额": [20000, 10000, 30000, 10000, 5000, 20000], # 新增份额用于算市值
+        "对应指数": ["特高压", "油气", "沪深300", "半导体", "黄金", "科创50"]
     }
     st.session_state.portfolio = pd.DataFrame(default_data)
 
-# ================= 侧边栏：指挥官控制台 =================
-st.sidebar.header("🎛️ 战术控制台")
-time_mode = st.sidebar.radio("当前战术时点", ["09:00 盘前预埋", "14:30 盘中执行"], index=1)
-
-st.sidebar.divider()
-st.sidebar.subheader("📊 实时指数录入")
-st.sidebar.caption("请手动输入当前看盘软件上的指数涨跌幅")
-
-# 动态提取数据中出现过的指数，生成输入框
-unique_indices = st.session_state.portfolio["对应指数"].unique()
-index_changes = {}
-for idx in unique_indices:
-    # 默认给一个0.0的初始值
-    index_changes[idx] = st.sidebar.number_input(f"{idx} 涨跌幅(%)", value=0.0, step=0.1, format="%.2f")
-
-# ================= 核心逻辑函数 =================
-def calculate_status(row):
-    # 1. 计算预估净值
-    change_pct = index_changes.get(row["对应指数"], 0)
-    est_nav = row["昨日净值"] * (1 + (change_pct / 100) * 0.95) # 0.95为估算折扣
-    est_profit_pct = (est_nav - row["持仓成本"]) / row["持仓成本"] * 100
+# ================= 3. 侧边栏：指挥与输入 =================
+with st.sidebar:
+    st.header("🎛️ 战术控制台")
     
-    # 2. 判断费率禁区
-    fee_status = "🟢 自由"
-    fee_color = "green"
-    fee_rate = 0.0
+    # A. 模式选择
+    time_mode = st.radio("当前战术时点", ["09:00 盘前预埋", "14:30 盘中执行"], index=1)
     
-    if row["类型"] == "场外":
-        if row["持有天数"] < 7:
-            fee_status = "🔴 禁区(<7天)"
-            fee_color = "red"
-            fee_rate = 1.5
-        elif 7 <= row["持有天数"] < 30:
-            fee_status = "🟡 警示(7-30天)"
-            fee_color = "orange"
-            fee_rate = 0.5
-    else:
-        fee_status = "⚡ 场内T+0/1"
-        fee_color = "blue"
+    st.divider()
+    
+    # B. 市场环境输入
+    st.subheader("📡 市场情报录入")
+    current_month = datetime.now().month
+    theme = MONTHLY_THEMES.get(current_month, "业绩/政策真空期")
+    st.info(f"📅 **本月主题**: {theme}")
+    
+    st.markdown("---")
+    st.caption("👇 输入实时涨跌幅 (用于盲盒估算)")
+    
+    # 动态生成指数输入框
+    unique_indices = st.session_state.portfolio["对应指数"].unique()
+    index_changes = {}
+    col_input1, col_input2 = st.columns(2)
+    
+    for i, idx in enumerate(unique_indices):
+        with (col_input1 if i % 2 == 0 else col_input2):
+            index_changes[idx] = st.number_input(f"{idx}%", value=0.0, step=0.1, format="%.2f")
 
-    # 3. 生成战术指令
-    instruction = "持有"
-    if fee_color == "red":
-        instruction = "🔒 锁仓 (规避1.5%惩罚)"
-    elif fee_color == "green" and change_pct < -3:
-        instruction = "✂️ 建议赎回 (避险)"
-    elif row["类型"] == "场内" and abs(change_pct) > 2:
-        instruction = "🔥 波动操作 (网格/T)"
+# ================= 4. 核心计算引擎 =================
+def process_portfolio(df, inputs):
+    res = df.copy()
+    
+    # A. 基础计算
+    res["实时涨跌幅"] = res["对应指数"].map(inputs).fillna(0)
+    # 盲盒估算公式：昨日 * (1 + 指数涨跌 * 0.95)
+    res["预估净值"] = res.apply(lambda x: x["昨日净值"] * (1 + (x["实时涨跌幅"]/100) * 0.95), axis=1)
+    res["当前市值"] = res["预估净值"] * res["持有份额"]
+    res["预估盈亏%"] = (res["预估净值"] - res["持仓成本"]) / res["持仓成本"] * 100
+    
+    # B. 费率与状态判定
+    def get_status(row):
+        if row["类型"] == "场内":
+            return "⚡ 场内", "blue", 0, 1.0 # 1.0是进度条满
         
-    return pd.Series([est_nav, est_profit_pct, fee_status, fee_rate, instruction])
+        days = row["持有天数"]
+        if days < 7:
+            return "🔴 禁区(1.5%)", "red", 1.5, min(days/7, 1.0)
+        elif days < 30:
+            return "🟡 警示(0.5%)", "orange", 0.5, min(days/30, 1.0)
+        else:
+            return "🟢 自由(0%)", "green", 0.0, 1.0
 
-# ================= 主界面 =================
-st.title("🚀 双时点基金战术指挥官 v2.0")
-
-# --- 模块1: 持仓数据管理 (可编辑!) ---
-with st.expander("📝 **点击管理持仓数据 (可像Excel一样直接修改)**", expanded=False):
-    st.caption("每天开盘前，请在此更新【持有天数】和【昨日净值】")
-    # 数据编辑器
-    edited_df = st.data_editor(
-        st.session_state.portfolio,
-        num_rows="dynamic", # 允许添加/删除行
-        use_container_width=True,
-        column_config={
-            "类型": st.column_config.SelectboxColumn(options=["场外", "场内"], required=True),
-            "对应指数": st.column_config.TextColumn(help="填入如：半导体、沪深300、黄金"),
-        }
-    )
-    # 实时保存修改到 Session State
-    st.session_state.portfolio = edited_df
-
-# --- 模块2: 战术大屏 ---
-if not edited_df.empty:
-    # 应用计算逻辑
-    result_df = edited_df.copy()
-    result_df[["预估今日净值", "预估总盈亏%", "费率状态", "赎回费率%", "AI指令"]] = result_df.apply(calculate_status, axis=1)
-
-    # 分栏展示
-    col1, col2 = st.columns([2, 1])
+    status_res = res.apply(get_status, axis=1, result_type='expand')
+    res[["状态文本", "状态颜色", "赎回费率", "解禁进度"]] = status_res
     
-    with col1:
-        st.subheader("🛡️ 场外战略仓 (盲盒透视)")
-        otc_df = result_df[result_df["类型"] == "场外"]
-        
-        for _, row in otc_df.iterrows():
-            # 颜色逻辑
-            color = "red" if "禁区" in row["费率状态"] else ("orange" if "警示" in row["费率状态"] else "green")
-            
-            with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 3])
-                c1.markdown(f"**{row['基金名称']}**")
-                c1.caption(f"持有 {row['持有天数']} 天 | {row['对应指数']}")
-                
-                c2.metric("实时涨跌", f"{index_changes.get(row['对应指数'], 0)}%", delta_color="normal")
-                c3.metric("预估净值", f"{row['预估今日净值']:.4f}", f"{row['预估总盈亏%']:.2f}%")
-                
-                c4.markdown(f":{color}[**{row['费率状态']}**]")
-                if "锁仓" in row['AI指令']:
-                    c4.error(row['AI指令'])
-                else:
-                    c4.info(row['AI指令'])
+    return res
 
-    with col2:
-        st.subheader("⚔️ 场内战术仓")
-        etf_df = result_df[result_df["类型"] == "场内"]
-        for _, row in etf_df.iterrows():
-             with st.container(border=True):
-                st.markdown(f"**{row['基金名称']}**")
-                change = index_changes.get(row['对应指数'], 0)
-                st.metric("实时涨跌", f"{change}%")
-                if abs(change) > 2:
-                    st.warning("⚠️ 触发波动操作阈值")
+# 执行计算
+processed_df = process_portfolio(st.session_state.portfolio, index_changes)
 
-else:
-    st.info("请先在上方👆添加持仓数据")
+# ================= 5. 主界面布局 =================
+st.title("🚀 双时点基金战术指挥官 v3.0")
 
-# ================= 底部：费用计算器 =================
+# --- 顶栏：资产概览 ---
+total_assets = processed_df["当前市值"].sum()
+otc_assets = processed_df[processed_df["类型"]=="场外"]["当前市值"].sum()
+etf_assets = processed_df[processed_df["类型"]=="场内"]["当前市值"].sum()
+
+m1, m2, m3 = st.columns(3)
+m1.metric("🛡️ 组合总市值", f"¥{total_assets:,.0f}")
+m2.metric("📦 场外战略仓 (70%)", f"¥{otc_assets:,.0f}", f"占比 {otc_assets/total_assets*100:.1f}%")
+m3.metric("⚔️ 场内战术仓 (30%)", f"¥{etf_assets:,.0f}", f"占比 {etf_assets/total_assets*100:.1f}%")
+
 st.divider()
-st.markdown("### 🧮 智能费用拦截器")
 
-cal_col1, cal_col2 = st.columns(2)
-with cal_col1:
-    selected_fund_name = st.selectbox("选择要测试赎回的基金", result_df["基金名称"].unique() if not result_df.empty else [])
+# --- 核心功能区 (Tabs) ---
+tab1, tab2, tab3 = st.tabs(["📊 战术看板 (Visual)", "📝 自动剧本 (Text)", "⚙️ 持仓管理 (Data)"])
 
-if selected_fund_name:
-    # 找到该基金数据
-    fund_data = result_df[result_df["基金名称"] == selected_fund_name].iloc[0]
+with tab1:
+    # 场外监控区
+    st.subheader("📦 场外持仓监控 (重点看红绿灯)")
     
-    with cal_col2:
-        redeem_amt = st.number_input("打算赎回金额 (¥)", value=10000, step=1000)
-    
-    cost = redeem_amt * (fund_data["赎回费率%"] / 100)
-    real_loss = 0
-    if fund_data["预估总盈亏%"] < 0:
-        real_loss = redeem_amt * (abs(fund_data["预估总盈亏%"])/100)
-
-    st.write(f"当前状态：**{fund_data['费率状态']}**")
-    
-    if fund_data["赎回费率%"] > 0.5:
-        st.error(f"🛑 **严重警告**：赎回将直接损失手续费 ¥{cost:.2f}！\n加上市值亏损，实际离场损失约 ¥{cost + real_loss:.2f}。")
-    elif fund_data["赎回费率%"] > 0:
-        st.warning(f"⚠️ **提醒**：赎回手续费 ¥{cost:.2f}。")
-    else:
-        st.success("✅ **通过**：当前无赎回手续费，可自由操作。")
+    for _, row in processed_df[processed_df["类型"]=="场外"].iterrows():
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            
+            # 列1：基础信息
+            c1.markdown(f"**{row['基金名称']}**")
+            c1.caption(f"指数：{row['对应指数']} | 成本：{row['持仓成本']:.4f}")
+            
+            # 列2：持有天数与进度条
+            c2.markdown(f"持有 **{row['持有天数']}** 天")
+            c2.progress(row['解禁进度'], text=row['状态文本'])
+            
+            # 列3：估值数据
+            val_color = "red" if row['预估盈亏%'] < 0
